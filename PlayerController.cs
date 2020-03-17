@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using LepTimer;
 
 public class PlayerController : MonoBehaviour
 {
@@ -50,9 +51,9 @@ public class PlayerController : MonoBehaviour
     }
     private State state;
 
+    public Collider wallRunCollider;
     private Rigidbody rb;
     private PhysicMaterial pm;
-    public Collider wallRunCollider;
     private PlayerCameraController camCon;
     private GameObject wall = null;
 
@@ -154,9 +155,9 @@ public class PlayerController : MonoBehaviour
                     if (contact.thisCollider == wallRunCollider && state != State.Walking)
                     {
                         angle = Vector3.Angle(contact.normal, Vector3.up);
-                        if (angle > 40f && angle < 120f)
+                        if (angle > 40f && angle < 100f)
                         {
-                            EnterWallrun(contact.otherCollider.gameObject);
+                            EnterWallrun();
                             groundNormal = contact.normal;
                             break;
                         }
@@ -211,81 +212,19 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private void EnterWallrun(GameObject wol)
+    private void EnterWallrun()
     {
         if (state != State.Wallruning)
         {
-            wall = wol;
-            Vector3 spid = rb.velocity;
-            spid = new Vector3(spid.x, 0, spid.z);
-            rb.velocity = spid;
             canDJump = true;
             state = State.Wallruning;
+            //This breaks jumping off the wall
+            //Vector3 spid = rb.velocity;
+            //spid = new Vector3(spid.x, 0, spid.z);
+            //rb.velocity = spid;
         }
     }
 
-
-    #endregion
-
-
-
-    #region MathGenious
-
-    private Vector2 ClampedAdditionVector(Vector2 a, Vector2 b)
-    {
-        float k, x, y;
-        k = Mathf.Sqrt(Mathf.Pow(a.x, 2) + Mathf.Pow(a.y, 2)) / Mathf.Sqrt(Mathf.Pow(a.x + b.x, 2) + Mathf.Pow(a.y + b.y, 2));
-        x = k * (a.x + b.x) - a.x;
-        y = k * (a.y + b.y) - a.y;
-        return new Vector2(x, y);
-    }
-
-    private Vector3 RotateToPlane(Vector3 vect, Vector3 normal)
-    {
-        Vector3 rotDir = Vector3.ProjectOnPlane(normal, Vector3.up);
-        Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
-        rotDir = rotation * rotDir;
-        float angle = Vector3.Angle(vect, normal);
-        angle -= 90f;
-        angle = -Mathf.Abs(angle);
-        rotation = Quaternion.AngleAxis(angle, rotDir);
-        vect = rotation * vect;
-        return vect;
-    }
-
-    private float WallrunCameraAngle()
-    {
-
-        Vector3 rotDir = Vector3.ProjectOnPlane(groundNormal, Vector3.up);
-        Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
-        rotDir = rotation * rotDir;
-        float angle = Vector3.SignedAngle(Vector3.up, groundNormal, Quaternion.AngleAxis(90f, rotDir) * groundNormal);
-        angle -= 90;
-        angle /= 180;
-
-        Vector3 playerDir = transform.forward;
-        Vector3 normal = new Vector3(groundNormal.x, 0, groundNormal.z);
-
-        return Vector3.Cross(playerDir, normal).y * angle;
-    }
-
-    private float DistanceToWall(GameObject otherObject)
-    {
-        if (otherObject != null) {
-            Vector3 closestSurfacePoint;
-            Vector3 position = transform.position;
-            position.y += 0.25f - height / 2f;
-
-            closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPointOnBounds(position);
-            closestSurfacePoint -= position;
-            float surfaceDistance = closestSurfacePoint.magnitude;
-            return surfaceDistance;
-        }
-        else
-        {
-            return -1;
-        }
-    }
     #endregion
 
 
@@ -294,17 +233,16 @@ public class PlayerController : MonoBehaviour
 
     private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration)
     {
-        rb.AddForce(-Physics.gravity);
-        Vector3 stickForce = -groundNormal * 2f * wallStickiness * Mathf.Clamp(Mathf.Pow(DistanceToWall(wall) / wallStickDistance, 0.5f) * 1.5f, 0, 1);
-        rb.AddForce(-groundNormal * 1f, ForceMode.Acceleration);
         wishDir = wishDir.normalized;
         wishDir = RotateToPlane(wishDir, groundNormal);
+        rb.AddForce(-Physics.gravity);
+        rb.AddForce(-groundNormal * wallStickiness, ForceMode.Acceleration);
         rb.AddForce(wishDir * wallAccel);
         if (jump)
         {
-            rb.AddForce(groundNormal * jumpForce, ForceMode.Impulse);
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-            Debug.Log("jumping");
+            Vector3 direction = new Vector3(groundNormal.x, 1, groundNormal.z);
+            rb.AddForce(direction * jumpForce, ForceMode.Impulse);
+
             EnterFlying();
         }
     }
@@ -480,6 +418,66 @@ public class PlayerController : MonoBehaviour
     }
 
     #endregion
+
+
+
+    #region MathGenious
+
+    private Vector2 ClampedAdditionVector(Vector2 a, Vector2 b)
+    {
+        float k, x, y;
+        k = Mathf.Sqrt(Mathf.Pow(a.x, 2) + Mathf.Pow(a.y, 2)) / Mathf.Sqrt(Mathf.Pow(a.x + b.x, 2) + Mathf.Pow(a.y + b.y, 2));
+        x = k * (a.x + b.x) - a.x;
+        y = k * (a.y + b.y) - a.y;
+        return new Vector2(x, y);
+    }
+
+    private Vector3 RotateToPlane(Vector3 vect, Vector3 normal)
+    {
+        Vector3 rotDir = Vector3.ProjectOnPlane(normal, Vector3.up);
+        Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
+        rotDir = rotation * rotDir;
+        float angle = -Vector3.Angle(Vector3.up, normal);
+        rotation = Quaternion.AngleAxis(angle, rotDir);
+        vect = rotation * vect;
+        return vect;
+    }
+
+    private float WallrunCameraAngle()
+    {
+        Vector3 rotDir = Vector3.ProjectOnPlane(groundNormal, Vector3.up);
+        Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
+        rotDir = rotation * rotDir;
+        float angle = Vector3.SignedAngle(Vector3.up, groundNormal, Quaternion.AngleAxis(90f, rotDir) * groundNormal);
+        angle -= 90;
+        angle /= 180;
+
+        Vector3 playerDir = transform.forward;
+        Vector3 normal = new Vector3(groundNormal.x, 0, groundNormal.z);
+
+        return Vector3.Cross(playerDir, normal).y * angle;
+    }
+
+    private float DistanceToWall(GameObject otherObject)
+    {
+        if (otherObject != null)
+        {
+            Vector3 closestSurfacePoint;
+            Vector3 position = transform.position;
+            position.y += 0.25f - height / 2f;
+
+            closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPointOnBounds(position);
+            closestSurfacePoint -= position;
+            float surfaceDistance = closestSurfacePoint.magnitude;
+            return surfaceDistance;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+    #endregion
+
 
 
 

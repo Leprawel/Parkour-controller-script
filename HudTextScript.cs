@@ -20,4 +20,9 @@ public class HudTextScript : MonoBehaviour
     {
         textBox.text = newVal.ToString("F2");
     }
+
+    public void SetVectorValue(Vector3 newVal)
+    {
+        textBox.text = newVal.ToString("F1");
+    }
 }
