@@ -1,0 +1,1 @@
+Scripts from my Unity project attempting to recreate certain Titanfall movement mechanics
