@@ -33,6 +33,7 @@ public class PlayerCameraController : MonoBehaviour
         {
             delta = Mathf.Abs(360 - wishTilt - curTilt);
         }
+        delta /= 2;
         curTilt = Mathf.LerpAngle(curTilt, wishTilt, Time.deltaTime * delta);
         RotateCamera();
     }

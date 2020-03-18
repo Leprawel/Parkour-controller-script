@@ -246,24 +246,26 @@ public class PlayerController : MonoBehaviour
 
     private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration, GameObject wol)
     {
-        wishDir = wishDir.normalized;
-        if (wall != null)
-        {
-        }
-        wishDir = RotateToPlane(wishDir, -VectorToWall(wol).normalized);
-        rb.AddForce(-Physics.gravity);
-        rb.AddForce(VectorToWall(wol).normalized * wallStickiness, ForceMode.Acceleration);
-        rb.AddForce(-rb.velocity * 2, ForceMode.Acceleration);
-        rb.AddForce(wishDir * wallAccel);
-        if (!grounded)
-        {
-            EnterFlying();
-        }
         if (jump)
         {
             Vector3 direction = new Vector3(groundNormal.x, 1, groundNormal.z);
             rb.AddForce(direction * jumpForce, ForceMode.Impulse);
 
+            EnterFlying();
+        }
+        else
+        {
+            Vector3 distance = VectorToWall(wol);
+            if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
+            wishDir = wishDir.normalized;
+            wishDir = RotateToPlane(wishDir, -distance.normalized);
+            rb.AddForce(-Physics.gravity);
+            rb.AddForce(distance.normalized * wallStickiness * Mathf.Clamp(distance.magnitude / wallStickDistance, 0, 1), ForceMode.Acceleration);
+            rb.AddForce(-rb.velocity * 1.3f, ForceMode.Acceleration);
+            rb.AddForce(wishDir * wallAccel);
+        }
+        if (!grounded)
+        {
             EnterFlying();
         }
     }
@@ -472,10 +474,6 @@ public class PlayerController : MonoBehaviour
         float angle = Vector3.SignedAngle(Vector3.up, groundNormal, Quaternion.AngleAxis(90f, rotDir) * groundNormal);
         angle -= 90;
         angle /= 180;
-        if (wol != null)
-        {
-            angle *= wallStickDistance / VectorToWall(wall).magnitude;
-        }
         Vector3 playerDir = transform.forward;
         Vector3 normal = new Vector3(groundNormal.x, 0, groundNormal.z);
 
@@ -488,8 +486,15 @@ public class PlayerController : MonoBehaviour
         {
             Vector3 closestSurfacePoint;
             Vector3 position = transform.position - Vector3.up;
-
-            closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPoint(position);
+            Collider cder = otherObject.GetComponent<Collider>();
+            if (cder.GetType() != typeof(MeshCollider))
+            {
+                closestSurfacePoint = cder.ClosestPoint(position);
+            }
+            else
+            {
+                return Vector3.positiveInfinity;
+            }
             closestSurfacePoint -= position;
             return closestSurfacePoint;
         }
