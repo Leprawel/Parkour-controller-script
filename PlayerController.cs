@@ -114,8 +114,8 @@ public class PlayerController : MonoBehaviour
         switch (state)
         {
             case State.Wallruning:
-                camCon.SetTilt(WallrunCameraAngle() * wallRunTilt);
-                Wallrun(dir, groundSpeed, grAccel);
+                camCon.SetTilt(WallrunCameraAngle(wall) * wallRunTilt);
+                Wallrun(dir, groundSpeed, grAccel, wall);
                 break;
             case State.Walking:
                 camCon.SetTilt(0);
@@ -212,7 +212,7 @@ public class PlayerController : MonoBehaviour
     private void EnterFlying()
     {
         grounded = false;
-        if(state == State.Wallruning && wall != null && VectorToWall(wall).magnitude < 0.5)
+        if(state == State.Wallruning && wall != null && VectorToWall(wall).magnitude < wallStickDistance)
         {
             return;
         }
@@ -244,15 +244,15 @@ public class PlayerController : MonoBehaviour
 
     #region Movement
 
-    private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration)
+    private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration, GameObject wol)
     {
         wishDir = wishDir.normalized;
         if (wall != null)
         {
         }
-        wishDir = RotateToPlane(wishDir, -VectorToWall(wall).normalized);
+        wishDir = RotateToPlane(wishDir, -VectorToWall(wol).normalized);
         rb.AddForce(-Physics.gravity);
-        rb.AddForce(VectorToWall(wall).normalized * wallStickiness, ForceMode.Acceleration);
+        rb.AddForce(VectorToWall(wol).normalized * wallStickiness, ForceMode.Acceleration);
         rb.AddForce(-rb.velocity * 2, ForceMode.Acceleration);
         rb.AddForce(wishDir * wallAccel);
         if (!grounded)
@@ -464,7 +464,7 @@ public class PlayerController : MonoBehaviour
         return vect;
     }
 
-    private float WallrunCameraAngle()
+    private float WallrunCameraAngle(GameObject wol)
     {
         Vector3 rotDir = Vector3.ProjectOnPlane(groundNormal, Vector3.up);
         Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
@@ -472,7 +472,10 @@ public class PlayerController : MonoBehaviour
         float angle = Vector3.SignedAngle(Vector3.up, groundNormal, Quaternion.AngleAxis(90f, rotDir) * groundNormal);
         angle -= 90;
         angle /= 180;
-
+        if (wol != null)
+        {
+            angle *= wallStickDistance / VectorToWall(wall).magnitude;
+        }
         Vector3 playerDir = transform.forward;
         Vector3 normal = new Vector3(groundNormal.x, 0, groundNormal.z);
 
@@ -486,8 +489,7 @@ public class PlayerController : MonoBehaviour
             Vector3 closestSurfacePoint;
             Vector3 position = transform.position - Vector3.up;
 
-            closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPointOnBounds(position);
-            Debug.Log(closestSurfacePoint -= position);
+            closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPoint(position);
             closestSurfacePoint -= position;
             return closestSurfacePoint;
         }
@@ -497,7 +499,6 @@ public class PlayerController : MonoBehaviour
         }
     }
     #endregion
-
 
 
 
