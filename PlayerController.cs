@@ -1,7 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using LepTimer;
 
 public class PlayerController : MonoBehaviour
 {
@@ -19,6 +18,8 @@ public class PlayerController : MonoBehaviour
     public float wallStickiness = 10f;
     public float wallStickDistance = 1f;
     public float wallRunTilt = 15f;
+    public float wallFloorBarrier = 40f;
+    public float wallBanTime = 0.3f;
 
     //Jump
     public float jumpForce = 6f;
@@ -26,7 +27,6 @@ public class PlayerController : MonoBehaviour
     public float bhopLeniency = 0.1f;
     public float dJumpBaseSpd = 8;
 
-    float bhopLenTimer = 0f;
     bool jump;
     bool canDJump = false;
 
@@ -51,21 +51,33 @@ public class PlayerController : MonoBehaviour
     }
     private State state;
 
+    //Components
     public Collider wallRunCollider;
     private Rigidbody rb;
     private PhysicMaterial pm;
     private PlayerCameraController camCon;
     private GameObject wall = null;
 
+    //Timers
+    private Timer bhopLenTimer;
+    private Timer wallBanTimer;
+
     void Start()
     {
+        //Timers
+        bhopLenTimer = gameObject.AddComponent<Timer>();
+        bhopLenTimer.SetTime(bhopLeniency);
+        wallBanTimer = gameObject.AddComponent<Timer>();
+        wallBanTimer.SetTime(bhopLeniency);
 
+        //Components
         camCon = transform.GetChild(0).GetComponent<PlayerCameraController>();
         rb = GetComponent<Rigidbody>();
         pm = GetComponent<CapsuleCollider>().material;
         height = GetComponent<Renderer>().bounds.size.y;
         camCon.SetTilt(0);
 
+        //Setting up beggining state
         EnterFlying();
         canDJump = !OnGround();
         pm.dynamicFriction = 0;
@@ -121,10 +133,6 @@ public class PlayerController : MonoBehaviour
         spidHud.SetValue(new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
         spidUpHud.SetValue(rb.velocity.y);
 
-        if (bhopLenTimer >= 0f)
-        {
-            bhopLenTimer -= Time.deltaTime;
-        }
         jump = false;
         running = false;
         crouching = false;
@@ -139,7 +147,7 @@ public class PlayerController : MonoBehaviour
             {
                 angle = Vector3.Angle(contact.normal, Vector3.up);
                 
-                if(angle < 40f)
+                if(angle < wallFloorBarrier)
                 {
                     EnterWalking();
                     grounded = true;
@@ -155,9 +163,9 @@ public class PlayerController : MonoBehaviour
                     if (contact.thisCollider == wallRunCollider && state != State.Walking)
                     {
                         angle = Vector3.Angle(contact.normal, Vector3.up);
-                        if (angle > 40f && angle < 100f)
+                        if (angle > wallFloorBarrier && angle < 100f)
                         {
-                            EnterWallrun();
+                            EnterWallrun(contact.otherCollider.gameObject);
                             groundNormal = contact.normal;
                             break;
                         }
@@ -196,7 +204,7 @@ public class PlayerController : MonoBehaviour
     {
         if (state != State.Walking)
         {
-            bhopLenTimer = bhopLeniency;
+            bhopLenTimer.StartTimer();
             state = State.Walking;
         }
     }
@@ -204,7 +212,11 @@ public class PlayerController : MonoBehaviour
     private void EnterFlying()
     {
         grounded = false;
-        if (state != State.Flying)
+        if(state == State.Wallruning && wall != null && VectorToWall(wall).magnitude < 0.5)
+        {
+            return;
+        }
+        else if (state != State.Flying)
         {
             wall = null;
             canDJump = true;
@@ -212,10 +224,11 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private void EnterWallrun()
+    private void EnterWallrun(GameObject wol)
     {
         if (state != State.Wallruning)
         {
+            wall = wol;
             canDJump = true;
             state = State.Wallruning;
             //This breaks jumping off the wall
@@ -234,10 +247,18 @@ public class PlayerController : MonoBehaviour
     private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration)
     {
         wishDir = wishDir.normalized;
-        wishDir = RotateToPlane(wishDir, groundNormal);
+        if (wall != null)
+        {
+        }
+        wishDir = RotateToPlane(wishDir, -VectorToWall(wall).normalized);
         rb.AddForce(-Physics.gravity);
-        rb.AddForce(-groundNormal * wallStickiness, ForceMode.Acceleration);
+        rb.AddForce(VectorToWall(wall).normalized * wallStickiness, ForceMode.Acceleration);
+        rb.AddForce(-rb.velocity * 2, ForceMode.Acceleration);
         rb.AddForce(wishDir * wallAccel);
+        if (!grounded)
+        {
+            EnterFlying();
+        }
         if (jump)
         {
             Vector3 direction = new Vector3(groundNormal.x, 1, groundNormal.z);
@@ -273,7 +294,7 @@ public class PlayerController : MonoBehaviour
                 {
                     vc = Vector3.ClampMagnitude(vc, maxSpeed + projVel.magnitude);
                 }
-                Vector2 force = ClampedAdditionVector(new Vector2(spid.x, spid.z), new Vector2(vc.x, vc.z));
+                Vector2 force = ClampedAdditionVector(new Vector2(spid.x, spid.z) * 2f, new Vector2(vc.x, vc.z) * 2f);
                 Vector3 sum1 = spid + vc;
                 Vector3 sum2 = spid + new Vector3(force.x, 0, force.y);
                 if (sum1.magnitude > sum2.magnitude && spid.magnitude > airSpeed)
@@ -313,7 +334,7 @@ public class PlayerController : MonoBehaviour
             }
             else
             {
-                if (new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude > airTargetSpeed * 0.9f && bhopLenTimer >= 0)
+                if (new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude > airTargetSpeed * 0.9f && !bhopLenTimer.Done())
                 {
                     Acceleration = 0;
                 }
@@ -458,22 +479,21 @@ public class PlayerController : MonoBehaviour
         return Vector3.Cross(playerDir, normal).y * angle;
     }
 
-    private float DistanceToWall(GameObject otherObject)
+    private Vector3 VectorToWall(GameObject otherObject)
     {
         if (otherObject != null)
         {
             Vector3 closestSurfacePoint;
-            Vector3 position = transform.position;
-            position.y += 0.25f - height / 2f;
+            Vector3 position = transform.position - Vector3.up;
 
             closestSurfacePoint = otherObject.GetComponent<Collider>().ClosestPointOnBounds(position);
+            Debug.Log(closestSurfacePoint -= position);
             closestSurfacePoint -= position;
-            float surfaceDistance = closestSurfacePoint.magnitude;
-            return surfaceDistance;
+            return closestSurfacePoint;
         }
         else
         {
-            return -1;
+            throw new System.ArgumentException("Parameter cannot be null", "original");
         }
     }
     #endregion
