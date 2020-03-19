@@ -1,0 +1,1 @@
+Do whatever the hell you want with this code but it would be nice if you mentioned me in your creation.
