@@ -11,15 +11,16 @@ public class PlayerController : MonoBehaviour
     //Air
     public float airSpeed = 3f;
     public float airAccel = 0.3f;
-    public float airTargetSpeed = 8f;
+    public float airTargetSpeed = 15f;
 
     //Wall
     public float wallAccel = 5f;
     public float wallStickiness = 10f;
-    public float wallStickDistance = 1f;
+    public float wallStickDistance = 0.5f;
     public float wallRunTilt = 15f;
     public float wallFloorBarrier = 40f;
     public float wallBanTime = 0.3f;
+    public float wallrunTime = 4f;
 
     //Jump
     public float jumpForce = 6f;
@@ -35,6 +36,7 @@ public class PlayerController : MonoBehaviour
     bool grounded = false;
 
     Vector3 groundNormal;
+    Vector3 bannedGroundNormal;
 
     float height;
     Vector3 dir;
@@ -51,37 +53,52 @@ public class PlayerController : MonoBehaviour
     }
     private State state;
 
-    //Components
-    public Collider wallRunCollider;
-    private Rigidbody rb;
-    private PhysicMaterial pm;
-    private PlayerCameraController camCon;
-    private GameObject wall = null;
-
     //Timers
     private Timer bhopLenTimer;
+    private Timer wallrunTimer;
+    private Timer wallDetachTimer;
     private Timer wallBanTimer;
+    private Timer jumpTimer;
+
+    //GameObjects
+    public Collider wallRunCollider;
+    public CapsuleCollider heightCollider;
+    public Camera cam;
+    private Rigidbody rb;
+    private CapsuleCollider pm;
+    private PlayerCameraController camCon;
 
     void Start()
     {
         //Timers
         bhopLenTimer = gameObject.AddComponent<Timer>();
         bhopLenTimer.SetTime(bhopLeniency);
-        wallBanTimer = gameObject.AddComponent<Timer>();
-        wallBanTimer.SetTime(bhopLeniency);
 
-        //Components
-        camCon = transform.GetChild(0).GetComponent<PlayerCameraController>();
+        wallBanTimer = gameObject.AddComponent<Timer>();
+        wallBanTimer.SetTime(wallBanTime);
+
+        wallDetachTimer = gameObject.AddComponent<Timer>();
+        wallDetachTimer.SetTime(0.2f);
+
+        wallrunTimer = gameObject.AddComponent<Timer>();
+        wallrunTimer.SetTime(wallrunTime);
+
+        jumpTimer = gameObject.AddComponent<Timer>();
+        jumpTimer.SetTime(0.05f);
+
+
+        //GameObjects
+        camCon = cam.GetComponent<PlayerCameraController>();
+        height = transform.GetChild(0).GetComponent<Renderer>().bounds.size.y;
         rb = GetComponent<Rigidbody>();
-        pm = GetComponent<CapsuleCollider>().material;
-        height = GetComponent<Renderer>().bounds.size.y;
+        pm = GetComponent<CapsuleCollider>();
         camCon.SetTilt(0);
 
         //Setting up beggining state
         EnterFlying();
-        canDJump = !OnGround();
-        pm.dynamicFriction = 0;
-        pm.frictionCombine = PhysicMaterialCombine.Minimum;
+        canDJump = true;
+        pm.material.dynamicFriction = 0;
+        pm.material.frictionCombine = PhysicMaterialCombine.Minimum;
     }
 
     void Update()
@@ -90,8 +107,7 @@ public class PlayerController : MonoBehaviour
             jump = true;
         if (Input.GetKey(KeyCode.LeftShift) && Input.GetAxisRaw("Vertical") == 1)
             running = true;
-        if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C))
-            crouching = true;
+        crouching = (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C));
         if (Input.GetKeyDown(KeyCode.V))
         {
             rb.AddForce(dir.normalized * 20f, ForceMode.VelocityChange);
@@ -101,21 +117,47 @@ public class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
-        if (rb.velocity.magnitude < 0.2f)
+        //if (crouching)
+        //{
+        //    //THIS IS BROKEN AND OFTEN CAUSES UNCONTROLLED ROTATAION
+        //    //Unity really doesnt like crouching and freeze rotation gets thrown out of the window when you crouch
+        //    //Ive got no idea rn how to fix that because its an engine bug and shoudnt happen (ther are no warning in docs that changing colliders may cause this)
+        //    //I noticed that when you already start spinning looking to the right will help you for some reason
+
+        //    cam.transform.localPosition = new Vector3(0f, Mathf.Lerp(cam.transform.localPosition.y, 1.3f, 0.5f), 0f);
+        //    heightCollider.center = new Vector3(0f, Mathf.Lerp(heightCollider.center.y, 0.8f, 0.3f), 0f);
+        //}
+        //else
+        //{
+        //    cam.transform.localPosition = new Vector3(0f, Mathf.Lerp(cam.transform.localPosition.y, 1.8f, 0.5f), 0f);
+        //    heightCollider.center = new Vector3(0f, Mathf.Lerp(heightCollider.center.y, 1.25f, 0.3f), 0f);
+        //}
+
+        if (wallDetachTimer.Done() && !wallBanTimer.Done())
         {
-            pm.dynamicFriction = 0.5f;
-            pm.frictionCombine = PhysicMaterialCombine.Average;
+            bannedGroundNormal = groundNormal;
         }
         else
         {
-            pm.dynamicFriction = 0f;
-            pm.frictionCombine = PhysicMaterialCombine.Minimum;
+            bannedGroundNormal = Vector3.zero;
         }
+
+        if (state == State.Walking && rb.velocity.magnitude < 0.5f)
+        {
+            pm.material.dynamicFriction = 1f;
+            pm.material.frictionCombine = PhysicMaterialCombine.Maximum;
+        }
+        else
+        {
+            pm.material.dynamicFriction = 0f;
+            pm.material.frictionCombine = PhysicMaterialCombine.Minimum;
+        }
+
         switch (state)
         {
             case State.Wallruning:
-                camCon.SetTilt(WallrunCameraAngle(wall) * wallRunTilt);
-                Wallrun(dir, groundSpeed, grAccel, wall);
+                camCon.SetTilt(WallrunCameraAngle() * wallRunTilt);
+                Wallrun(dir, groundSpeed, grAccel);
                 break;
             case State.Walking:
                 camCon.SetTilt(0);
@@ -135,7 +177,6 @@ public class PlayerController : MonoBehaviour
 
         jump = false;
         running = false;
-        crouching = false;
     }
 
     void OnCollisionStay(Collision collision)
@@ -146,14 +187,16 @@ public class PlayerController : MonoBehaviour
             foreach (ContactPoint contact in collision.contacts)
             {
                 angle = Vector3.Angle(contact.normal, Vector3.up);
-                
                 if(angle < wallFloorBarrier)
                 {
                     EnterWalking();
                     grounded = true;
                     groundNormal = contact.normal;
-                    break;
+                    return;
                 }
+            }
+            if (VectorToGround().magnitude > 0.2f)
+            {
                 grounded = false;
             }
             if (grounded == false)
@@ -163,11 +206,12 @@ public class PlayerController : MonoBehaviour
                     if (contact.thisCollider == wallRunCollider && state != State.Walking)
                     {
                         angle = Vector3.Angle(contact.normal, Vector3.up);
-                        if (angle > wallFloorBarrier && angle < 100f)
+                        if (angle > wallFloorBarrier && angle < 120f)
                         {
-                            EnterWallrun(contact.otherCollider.gameObject);
+                            grounded = true;
                             groundNormal = contact.normal;
-                            break;
+                            EnterWallrun();
+                            return;
                         }
                     }
                 }
@@ -192,11 +236,6 @@ public class PlayerController : MonoBehaviour
         return rb.transform.TransformDirection(direction);
     }
 
-    private bool OnGround()
-    {   //To be removed
-        return grounded;
-    }
-
 
 
     #region EnterState
@@ -204,37 +243,34 @@ public class PlayerController : MonoBehaviour
     {
         if (state != State.Walking)
         {
+            SoundManagerScript.PlaySound("land");
             bhopLenTimer.StartTimer();
             state = State.Walking;
         }
     }
 
-    private void EnterFlying()
+    private void EnterFlying( bool wishFly = false)
     {
         grounded = false;
-        if(state == State.Wallruning && wall != null && VectorToWall(wall).magnitude < wallStickDistance)
+        if(state == State.Wallruning && VectorToWall().magnitude < wallStickDistance && !wishFly)
         {
             return;
         }
         else if (state != State.Flying)
         {
-            wall = null;
+            wallBanTimer.StartTimer();
             canDJump = true;
             state = State.Flying;
         }
     }
 
-    private void EnterWallrun(GameObject wol)
+    private void EnterWallrun()
     {
-        if (state != State.Wallruning)
+        if (state != State.Wallruning && VectorToGround().magnitude > 0.2f && CanRunOnThisWall(bannedGroundNormal) && wallDetachTimer.Done())
         {
-            wall = wol;
+            wallrunTimer.StartTimer();
             canDJump = true;
             state = State.Wallruning;
-            //This breaks jumping off the wall
-            //Vector3 spid = rb.velocity;
-            //spid = new Vector3(spid.x, 0, spid.z);
-            //rb.velocity = spid;
         }
     }
 
@@ -244,28 +280,71 @@ public class PlayerController : MonoBehaviour
 
     #region Movement
 
-    private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration, GameObject wol)
+    private void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration)
     {
         if (jump)
         {
             Vector3 direction = new Vector3(groundNormal.x, 1, groundNormal.z);
             rb.AddForce(direction * jumpForce, ForceMode.Impulse);
-
-            EnterFlying();
+            EnterFlying(true);
+        }
+        else if (wallrunTimer.Done() || crouching)
+        {
+            rb.AddForce(groundNormal * 3f, ForceMode.Impulse);
+            EnterFlying(true);
         }
         else
         {
-            Vector3 distance = VectorToWall(wol);
-            if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
+            //Variables
+            Vector3 distance = VectorToWall();
             wishDir = wishDir.normalized;
             wishDir = RotateToPlane(wishDir, -distance.normalized);
-            rb.AddForce(-Physics.gravity);
+            wishDir *= wallAccel;
+            Vector3 antiGravityForce = -Physics.gravity;
+            Vector3 verticalDamping;
+            
+
+            //Calculating forces
+            if ( Mathf.Sign(rb.velocity.y) != Mathf.Sign(wishDir.y) && rb.velocity.y < 0)
+            {
+                verticalDamping = new Vector3(0, -rb.velocity.y * 0.1f, 0);
+                rb.AddForce(verticalDamping, ForceMode.VelocityChange);
+            }
+            else
+            {
+                verticalDamping = new Vector3(0, -rb.velocity.y * 0.5f, 0);
+                rb.AddForce(verticalDamping, ForceMode.Acceleration);
+            }
+            if(wishDir.y < -0.3)
+            {
+                wishDir.y *= 2f;
+            }
+            Vector3 horizontalDamping = new Vector3(-rb.velocity.x, 0, -rb.velocity.z);
+            if (Vector3.Dot(horizontalDamping, new Vector3(wishDir.x, 0, wishDir.z)) > 0f)
+            {
+                horizontalDamping *= (horizontalDamping - wishDir).magnitude;
+            }
+            else
+            {
+                horizontalDamping = Vector3.ClampMagnitude(horizontalDamping, 3);
+            }
+
+            if (wallrunTimer.FractionLeft() < 0.33)
+            {
+                antiGravityForce *= wallrunTimer.FractionLeft();
+            }
+            if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
+
+
+            //Adding forces
+            rb.AddForce(antiGravityForce);
             rb.AddForce(distance.normalized * wallStickiness * Mathf.Clamp(distance.magnitude / wallStickDistance, 0, 1), ForceMode.Acceleration);
-            rb.AddForce(-rb.velocity * 1.3f, ForceMode.Acceleration);
-            rb.AddForce(wishDir * wallAccel);
+            rb.AddForce(horizontalDamping, ForceMode.Acceleration);
+            rb.AddForce(wishDir);
         }
         if (!grounded)
         {
+            wallDetachTimer.StartTimer();
             EnterFlying();
         }
     }
@@ -307,7 +386,7 @@ public class PlayerController : MonoBehaviour
                 rb.AddForce(vc, ForceMode.VelocityChange);
             }
         }
-        if (OnGround())
+        if (grounded)
         {
             EnterWalking();
         }
@@ -379,17 +458,19 @@ public class PlayerController : MonoBehaviour
             //    spid = spid.normalized * Acceleration;
             //    rb.AddForce(spid);
             //}
-            //if (!OnGround())
+            //if (!grounded())
             //    EnterFlying();
         }
     }
 
     private void Jump()
     {
-        if (OnGround())
+        if (state == State.Walking && jumpTimer.Done())
         {
+            SoundManagerScript.PlaySound("jump");
             rb.AddForce(0, jumpForce, 0, ForceMode.Impulse);
             EnterFlying();
+            jumpTimer.StartTimer();
         }
     }
 
@@ -397,6 +478,7 @@ public class PlayerController : MonoBehaviour
     {
         if (canDJump)
         {
+            SoundManagerScript.PlaySound("djump");
             float tempJumpForce = jumpForce;
             //Calculate upwards
             float upSpeed = rb.velocity.y;
@@ -414,24 +496,23 @@ public class PlayerController : MonoBehaviour
             Vector2 force = Vector2.zero;
             wishDir = wishDir.normalized;
             Vector3 spid = new Vector3(rb.velocity.x, 0, rb.velocity.z);
-            if (spid.magnitude > airTargetSpeed)
+            if(spid.magnitude < airTargetSpeed)
             {
                 jumpVector = wishDir * dashForce;
-                spid = spid.normalized;
-                if(Vector3.Dot(spid, wishDir) > 0)
-                {
-                    spid = Quaternion.Euler(0,90,0) * spid;
-                    jumpVector = Vector3.Project(jumpVector, spid);
-                    force = ClampedAdditionVector(new Vector2(rb.velocity.x, rb.velocity.z), new Vector2(jumpVector.x, jumpVector.z));
-                    jumpVector.x = force.x;
-                    jumpVector.z = force.y;
-                }
+                jumpVector -= spid;
+            }
+            else if (Vector3.Dot(spid.normalized, wishDir) > -0.4f)
+            {
+                jumpVector = wishDir * dashForce;
+                force = ClampedAdditionVector(new Vector2(rb.velocity.x, rb.velocity.z), new Vector2(jumpVector.x, jumpVector.z));
+                jumpVector.x = force.x;
+                jumpVector.z = force.y;
             }
             else
             {
-                if(wishDir.magnitude != 0)
-                    jumpVector = wishDir * airTargetSpeed - spid;
+                jumpVector = wishDir * spid.magnitude;
             }
+
             //Apply Jump
             jumpVector.y = tempJumpForce;
             rb.velocity = new Vector3(rb.velocity.x, upSpeed, rb.velocity.z);
@@ -466,7 +547,7 @@ public class PlayerController : MonoBehaviour
         return vect;
     }
 
-    private float WallrunCameraAngle(GameObject wol)
+    private float WallrunCameraAngle()
     {
         Vector3 rotDir = Vector3.ProjectOnPlane(groundNormal, Vector3.up);
         Quaternion rotation = Quaternion.AngleAxis(-90f, Vector3.up);
@@ -480,27 +561,47 @@ public class PlayerController : MonoBehaviour
         return Vector3.Cross(playerDir, normal).y * angle;
     }
 
-    private Vector3 VectorToWall(GameObject otherObject)
+    private bool CanRunOnThisWall(Vector3 normal)
     {
-        if (otherObject != null)
+        if(Vector3.Angle(normal, groundNormal) > 10 || wallBanTimer.Done())
         {
-            Vector3 closestSurfacePoint;
-            Vector3 position = transform.position - Vector3.up;
-            Collider cder = otherObject.GetComponent<Collider>();
-            if (cder.GetType() != typeof(MeshCollider))
-            {
-                closestSurfacePoint = cder.ClosestPoint(position);
-            }
-            else
-            {
-                return Vector3.positiveInfinity;
-            }
-            closestSurfacePoint -= position;
-            return closestSurfacePoint;
+            return true;
         }
         else
         {
-            throw new System.ArgumentException("Parameter cannot be null", "original");
+            return false;
+        }
+    }
+
+    private Vector3 VectorToWall()
+    {
+        Vector3 direction;
+        Vector3 position = transform.position + Vector3.up * 0.1f;
+        RaycastHit hit;
+        if (Physics.Raycast(position, -groundNormal, out hit, wallStickDistance) && Vector3.Angle(groundNormal, hit.normal) < 70)
+        {
+            groundNormal = hit.normal;
+            Physics.Raycast(position, -groundNormal, out hit, wallStickDistance);
+            direction = hit.point - position;
+            return direction;
+        }
+        else
+        {
+            return Vector3.positiveInfinity;
+        }
+    }
+
+    private Vector3 VectorToGround()
+    {
+        Vector3 position = transform.position;
+        RaycastHit hit;
+        if (Physics.Raycast(position, Vector3.down, out hit, wallStickDistance))
+        {
+            return hit.point - position;
+        }
+        else
+        {
+            return Vector3.positiveInfinity;
         }
     }
     #endregion

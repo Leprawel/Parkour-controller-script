@@ -13,9 +13,15 @@ public class PlayerCameraController : MonoBehaviour
     private float curTilt = 0;
     private float wishTilt = 0;
     private float delta;
+    private float wishFov = 90;
+    private float addedFov = 90;
+    private float fov = 90;
+    public Camera cam;
+    private Rigidbody rb;
 
     void Start()
     {
+        rb = GetComponentInParent<Rigidbody>();
         curTilt = transform.localEulerAngles.z;
         player = transform.parent.gameObject;
         Cursor.lockState = CursorLockMode.Locked;
@@ -24,6 +30,9 @@ public class PlayerCameraController : MonoBehaviour
 
     void Update()
     {
+        addedFov = Mathf.Clamp(rb.velocity.magnitude - 3.44f, 0f, 180f - fov);
+        fov = Mathf.Lerp(fov, wishFov + addedFov, Time.deltaTime);
+        cam.fieldOfView = fov;
         curTilt = transform.localEulerAngles.z;
         if(curTilt < 180)
         {
@@ -73,7 +82,7 @@ public class PlayerCameraController : MonoBehaviour
 
     public void SetFov(float newVal)
     {
-        Camera.main.fieldOfView = newVal;
+        wishFov = newVal;
     }
     #endregion
 }

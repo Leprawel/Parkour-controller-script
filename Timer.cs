@@ -36,9 +36,14 @@ public class Timer : MonoBehaviour
         return currentTime;
     }
 
-    public float FractionDone()
+    public float FractionLeft()
     {
         return currentTime / timer;
+    }
+
+    public float FractionDone()
+    {
+        return (timer - currentTime) / timer;
     }
 
     public bool Done()
