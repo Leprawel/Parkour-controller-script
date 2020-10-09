@@ -10,16 +10,17 @@ public class PlayerMovement : MonoBehaviour
     float grAccel = 20f;
 
     //Air
-    float airSpeed = 5f;
+    float airSpeed = 4f;
     float airAccel = 20f;
 
     //Jump
-    float jumpUpSpeed = 8f;
-    float dashSpeed = 6f;
+    float jumpUpSpeed = 9.2f;
+    float dashSpeed = 5f;
 
     //Wall
-    float wallSpeed = 10f;
-    float wallAccel = 6f;
+    float wallSpeed = 12f;
+    float wallClimbSpeed = 3f;
+    float wallAccel = 20f;
     float wallRunTime = 3f;
     float wallStickiness = 66f;
     float wallStickDistance = 1f;
@@ -65,6 +66,7 @@ public class PlayerMovement : MonoBehaviour
     void OnGUI()
     {
         GUILayout.Label("Spid: " + new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
+        GUILayout.Label("SpidUp: " + rb.velocity.y);
     }
 
     void Update()
@@ -81,7 +83,7 @@ public class PlayerMovement : MonoBehaviour
         //Special use
         if (Input.GetKeyDown(KeyCode.T)) transform.position = new Vector3(0f, 30f, 0f);
         if (Input.GetKeyDown(KeyCode.X)) rb.velocity = new Vector3(rb.velocity.x, 40f, rb.velocity.z);
-        if (Input.GetKeyDown(KeyCode.V)) rb.AddForce(dir * 20f, ForceMode.VelocityChange);
+        //if (Input.GetKeyDown(KeyCode.V)) rb.AddForce(dir * 20f, ForceMode.VelocityChange);
     }
 
     void FixedUpdate()
@@ -112,7 +114,7 @@ public class PlayerMovement : MonoBehaviour
         {
             case Mode.Wallruning:
                 camCon.SetTilt(WallrunCameraAngle());
-                Wallrun(dir, wallSpeed, wallAccel);
+                Wallrun(dir, wallSpeed, wallClimbSpeed, wallAccel);
                 break;
 
             case Mode.Walking:
@@ -261,7 +263,8 @@ public class PlayerMovement : MonoBehaviour
         else
         {
             wishDir = wishDir.normalized;
-            Vector3 spid = new Vector3(rb.velocity.x, 0, rb.velocity.z);
+            Vector3 spid = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
+            if (spid.magnitude > maxSpeed) Acceleration *= spid.magnitude/maxSpeed;
             spid = wishDir * maxSpeed - spid;
 
             if (spid.magnitude < 0.5f)
@@ -285,35 +288,45 @@ public class PlayerMovement : MonoBehaviour
         {
             DoubleJump(wishDir);
         }
+
         if (crouch && rb.velocity.y > -10 && Input.GetKey(KeyCode.Space))
         {
             rb.AddForce(Vector3.down * 20f, ForceMode.Acceleration);
         }
+
         if (wishDir != Vector3.zero)
         {
+            wishDir = wishDir.normalized;
             // project the velocity onto the movevector
             Vector3 projVel = Vector3.Project(rb.velocity, wishDir);
 
             // check if the movevector is moving towards or away from the projected velocity
-            bool isAway = Vector3.Dot(wishDir.normalized, projVel.normalized) <= 0f;
+            bool isAway = Vector3.Dot(wishDir, projVel) <= 0f;
 
             // only apply force if moving away from velocity or velocity is below MaxAirSpeed
             if (projVel.magnitude < maxSpeed || isAway)
             {
-                rb.AddForce(wishDir.normalized * Acceleration, ForceMode.Acceleration);
-            }
+                // calculate the ideal movement force
+                Vector3 vc = wishDir * Acceleration;
 
+                // Apply the force
+                rb.AddForce(vc, ForceMode.Acceleration);
+            }
         }
     }
 
-    void Wallrun(Vector3 wishDir, float maxSpeed, float Acceleration)
+    void Wallrun(Vector3 wishDir, float maxSpeed, float climbSpeed, float Acceleration)
     {
         if (jump)
         {
+            //Vertical
+            float upForce = Mathf.Clamp(jumpUpSpeed - rb.velocity.y, 0, Mathf.Infinity);
+            rb.AddForce(new Vector3(0, upForce, 0), ForceMode.VelocityChange);
+
+            //Horizontal
             Vector3 jumpOffWall = groundNormal.normalized;
-            jumpOffWall.y = 0f;
             jumpOffWall *= dashSpeed;
-            jumpOffWall.y = jumpUpSpeed;
+            jumpOffWall.y = 0;
             rb.AddForce(jumpOffWall, ForceMode.VelocityChange);
             wrTimer = 0f;
             EnterFlying(true);
@@ -325,38 +338,31 @@ public class PlayerMovement : MonoBehaviour
         }
         else
         {
-            //Variables
+            //Horizontal
             Vector3 distance = VectorToWall();
             wishDir = RotateToPlane(wishDir, -distance.normalized);
-            wishDir = wishDir.normalized * maxSpeed - rb.velocity;
-            if (rb.velocity.magnitude < maxSpeed) Acceleration *= wishDir.magnitude;
-            wishDir = wishDir.normalized * Acceleration;
+            wishDir = wishDir.normalized * maxSpeed;
+            wishDir.y = Mathf.Clamp(wishDir.y, -climbSpeed, climbSpeed);
+            Vector3 wallrunForce = wishDir - rb.velocity;
+            wallrunForce = wallrunForce.normalized * Acceleration;
+            if (new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude > maxSpeed) wallrunForce /= 2f;
 
-            if (Mathf.Sign(wishDir.y) == 1)
-            {
-                if (Mathf.Sign(rb.velocity.y) == 1)
-                {
-                    wishDir.y /= 10f;
-                }
-                else
-                {
-                    wishDir.y *= 2f;
-                }
-            }
+            //Vertical
+            if (rb.velocity.y < 0f && wishDir.y > 0f) wallrunForce.y = 2f * Acceleration;
 
+            //Anti-gravity force
             Vector3 antiGravityForce = -Physics.gravity;
-
             if (wrTimer < 0.33 * wallRunTime)
             {
                 antiGravityForce *= wrTimer / wallRunTime;
+                wallrunForce += antiGravityForce + Physics.gravity;
             }
             if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
-
 
             //Adding forces
             rb.AddForce(antiGravityForce, ForceMode.Acceleration);
             rb.AddForce(distance.normalized * wallStickiness * Mathf.Clamp(distance.magnitude / wallStickDistance, 0, 1), ForceMode.Acceleration);
-            rb.AddForce(wishDir, ForceMode.Acceleration);
+            rb.AddForce(wallrunForce, ForceMode.Acceleration);
         }
         if (!grounded)
         {
@@ -397,11 +403,11 @@ public class PlayerMovement : MonoBehaviour
                     float dot = Vector3.Dot(wishDir.normalized, horSpid.normalized);
                     if (dot > 0)
                     {
-                        newSpidMagnitude = dashSpeed + (horSpid.magnitude - dashSpeed) * Mathf.Sqrt(dot);
+                        newSpidMagnitude = dashSpeed + (horSpid.magnitude - dashSpeed) * dot;
                     }
                     else
                     {
-                        newSpidMagnitude = Mathf.Clamp(dashSpeed * Mathf.Sqrt(1 + dot), dashSpeed * (dashSpeed/horSpid.magnitude) , dashSpeed);
+                        newSpidMagnitude = Mathf.Clamp(dashSpeed * (1 + dot), dashSpeed * (dashSpeed/horSpid.magnitude) , dashSpeed);
                     }
                 }
 
