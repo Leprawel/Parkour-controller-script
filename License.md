@@ -1,1 +1,1 @@
-Do whatever the hell you want with this code but it would be nice if you mentioned me in your creation.
+Do whatever you want with this code, but you have to mention me in the creation you use this code for.
