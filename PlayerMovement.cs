@@ -10,16 +10,16 @@ public class PlayerMovement : MonoBehaviour
     float grAccel = 20f;
 
     //Air
-    float airSpeed = 4f;
+    float airSpeed = 3f;
     float airAccel = 20f;
 
     //Jump
     float jumpUpSpeed = 9.2f;
-    float dashSpeed = 5f;
+    float dashSpeed = 6f;
 
     //Wall
-    float wallSpeed = 12f;
-    float wallClimbSpeed = 3f;
+    float wallSpeed = 10f;
+    float wallClimbSpeed = 4f;
     float wallAccel = 20f;
     float wallRunTime = 3f;
     float wallStickiness = 66f;
@@ -38,10 +38,12 @@ public class PlayerMovement : MonoBehaviour
     //States
     bool running;
     bool jump;
-    bool crouch;
+    bool crouched;
     bool grounded;
 
     Vector3 groundNormal = Vector3.up;
+
+    CapsuleCollider col;
 
     enum Mode
     {
@@ -61,40 +63,42 @@ public class PlayerMovement : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         pm = GetComponent<CapsuleCollider>();
         camCon = GetComponentInChildren<CameraController>();
+        col = GetComponent<CapsuleCollider>();
     }
 
-    void OnGUI()
-    {
-        GUILayout.Label("Spid: " + new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
-        GUILayout.Label("SpidUp: " + rb.velocity.y);
-    }
+    //void OnGUI()
+    //{
+    //    GUILayout.Label("Spid: " + new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
+    //    GUILayout.Label("SpidUp: " + rb.velocity.y);
+    //}
 
     void Update()
     {
+        col.material.dynamicFriction = 0f;
         dir = Direction();
 
         running = (Input.GetKey(KeyCode.LeftShift) && Input.GetAxisRaw("Vertical") > 0.9);
-        crouch = (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C));
-        if (Input.GetKeyDown(KeyCode.Space) || Input.GetAxisRaw("Mouse ScrollWheel") != 0)
+        crouched = (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C));
+        if (Input.GetKeyDown(KeyCode.Space))
         {
             jump = true;
         }
 
         //Special use
-        if (Input.GetKeyDown(KeyCode.T)) transform.position = new Vector3(0f, 30f, 0f);
-        if (Input.GetKeyDown(KeyCode.X)) rb.velocity = new Vector3(rb.velocity.x, 40f, rb.velocity.z);
+        //if (Input.GetKeyDown(KeyCode.T)) transform.position = new Vector3(0f, 30f, 0f);
+        //if (Input.GetKeyDown(KeyCode.X)) rb.velocity = new Vector3(rb.velocity.x, 40f, rb.velocity.z);
         //if (Input.GetKeyDown(KeyCode.V)) rb.AddForce(dir * 20f, ForceMode.VelocityChange);
     }
 
     void FixedUpdate()
     {
-        if (mode == Mode.Walking && rb.velocity.magnitude < 0.5f)
+        if (crouched)
         {
-            pm.material.dynamicFriction = 0.1f;
+            col.height = Mathf.Max(0.6f, col.height - Time.deltaTime * 10f);
         }
         else
         {
-            pm.material.dynamicFriction = 0f;
+            col.height = Mathf.Min(1.8f, col.height + Time.deltaTime * 10f);
         }
 
         if (wallStickTimer == 0f && wallBan > 0f)
@@ -204,7 +208,7 @@ public class PlayerMovement : MonoBehaviour
     {
         if (mode != Mode.Walking && canJump)
         {
-            if (mode == Mode.Flying && crouch)
+            if (mode == Mode.Flying && crouched)
             {
                 rb.AddForce(-rb.velocity.normalized, ForceMode.VelocityChange);
             }
@@ -213,6 +217,7 @@ public class PlayerMovement : MonoBehaviour
                 //camCon.Punch(new Vector2(0, -3f));
             }
             //StartCoroutine(bHopCoroutine(bhopLeniency));
+            gameObject.SendMessage("OnStartWalking");
             mode = Mode.Walking;
         }
     }
@@ -239,6 +244,7 @@ public class PlayerMovement : MonoBehaviour
         {
             if (VectorToGround().magnitude > 0.2f && CanRunOnThisWall(bannedGroundNormal) && wallStickTimer == 0f)
             {
+                gameObject.SendMessage("OnStartWallrunning");
                 wrTimer = wallRunTime;
                 canDJump = true;
                 mode = Mode.Wallruning;
@@ -254,68 +260,63 @@ public class PlayerMovement : MonoBehaviour
 
 
     #region Movement Types
-    void Walk(Vector3 wishDir, float maxSpeed, float Acceleration)
+    void Walk(Vector3 wishDir, float maxSpeed, float acceleration)
     {
         if (jump && canJump)
         {
+            gameObject.SendMessage("OnJump");
             Jump();
         }
         else
         {
+            if (crouched) acceleration = 1f;
             wishDir = wishDir.normalized;
             Vector3 spid = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            if (spid.magnitude > maxSpeed) Acceleration *= spid.magnitude/maxSpeed;
-            spid = wishDir * maxSpeed - spid;
+            if (spid.magnitude > maxSpeed) acceleration *= spid.magnitude/maxSpeed;
+            Vector3 direction = wishDir * maxSpeed - spid;
 
-            if (spid.magnitude < 0.5f)
+            if (direction.magnitude < 0.5f)
             {
-                Acceleration *= spid.magnitude / 0.5f;
+                acceleration *= direction.magnitude / 0.5f;
             }
 
-            spid = spid.normalized * Acceleration;
-            float magn = spid.magnitude;
-            spid = Vector3.ProjectOnPlane(spid, groundNormal);
-            spid = spid.normalized;
-            spid *= magn;
+            direction = direction.normalized * acceleration;
+            float magn = direction.magnitude;
+            direction = direction.normalized;
+            direction *= magn;
 
-            rb.AddForce(spid, ForceMode.Acceleration);
+            Vector3 slopeCorrection = groundNormal * Physics.gravity.y / groundNormal.y;
+            slopeCorrection.y = 0f;
+            direction += slopeCorrection;
+
+            rb.AddForce(direction, ForceMode.Acceleration);
         }
     }
 
-    void AirMove(Vector3 wishDir, float maxSpeed, float Acceleration)
+    void AirMove(Vector3 wishDir, float maxSpeed, float acceleration)
     {
-        if (jump && !crouch)
+        if (jump && !crouched)
         {
+            gameObject.SendMessage("OnDoubleJump");
             DoubleJump(wishDir);
         }
 
-        if (crouch && rb.velocity.y > -10 && Input.GetKey(KeyCode.Space))
+        if (crouched && rb.velocity.y > -10 && Input.GetKey(KeyCode.Space))
         {
             rb.AddForce(Vector3.down * 20f, ForceMode.Acceleration);
         }
 
-        if (wishDir != Vector3.zero)
-        {
-            wishDir = wishDir.normalized;
-            // project the velocity onto the movevector
-            Vector3 projVel = Vector3.Project(rb.velocity, wishDir);
+        float projVel = Vector3.Dot(new Vector3(rb.velocity.x, 0f, rb.velocity.z), wishDir); // Vector projection of Current velocity onto accelDir.
+        float accelVel = acceleration * Time.deltaTime; // Accelerated velocity in direction of movment
 
-            // check if the movevector is moving towards or away from the projected velocity
-            bool isAway = Vector3.Dot(wishDir, projVel) <= 0f;
+        // If necessary, truncate the accelerated velocity so the vector projection does not exceed max_velocity
+        if (projVel + accelVel > maxSpeed)
+            accelVel = Mathf.Max(0f, maxSpeed - projVel);
 
-            // only apply force if moving away from velocity or velocity is below MaxAirSpeed
-            if (projVel.magnitude < maxSpeed || isAway)
-            {
-                // calculate the ideal movement force
-                Vector3 vc = wishDir * Acceleration;
-
-                // Apply the force
-                rb.AddForce(vc, ForceMode.Acceleration);
-            }
-        }
+        rb.AddForce(wishDir.normalized * accelVel, ForceMode.VelocityChange);
     }
 
-    void Wallrun(Vector3 wishDir, float maxSpeed, float climbSpeed, float Acceleration)
+    void Wallrun(Vector3 wishDir, float maxSpeed, float climbSpeed, float acceleration)
     {
         if (jump)
         {
@@ -331,7 +332,7 @@ public class PlayerMovement : MonoBehaviour
             wrTimer = 0f;
             EnterFlying(true);
         }
-        else if (wrTimer == 0f || crouch)
+        else if (wrTimer == 0f || crouched)
         {
             rb.AddForce(groundNormal * 3f, ForceMode.VelocityChange);
             EnterFlying(true);
@@ -344,11 +345,11 @@ public class PlayerMovement : MonoBehaviour
             wishDir = wishDir.normalized * maxSpeed;
             wishDir.y = Mathf.Clamp(wishDir.y, -climbSpeed, climbSpeed);
             Vector3 wallrunForce = wishDir - rb.velocity;
-            wallrunForce = wallrunForce.normalized * Acceleration;
+            wallrunForce = wallrunForce.normalized * acceleration;
             if (new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude > maxSpeed) wallrunForce /= 2f;
 
             //Vertical
-            if (rb.velocity.y < 0f && wishDir.y > 0f) wallrunForce.y = 2f * Acceleration;
+            if (rb.velocity.y < 0f && wishDir.y > 0f) wallrunForce.y = 2f * acceleration;
 
             //Anti-gravity force
             Vector3 antiGravityForce = -Physics.gravity;
