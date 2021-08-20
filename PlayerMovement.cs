@@ -22,7 +22,7 @@ public class PlayerMovement : MonoBehaviour
     float wallClimbSpeed = 4f;
     float wallAccel = 20f;
     float wallRunTime = 3f;
-    float wallStickiness = 66f;
+    float wallStickiness = 20f;
     float wallStickDistance = 1f;
     float wallFloorBarrier = 40f;
     float wallBanTime = 4f;
@@ -41,6 +41,8 @@ public class PlayerMovement : MonoBehaviour
     bool crouched;
     bool grounded;
 
+    Collider ground;
+
     Vector3 groundNormal = Vector3.up;
 
     CapsuleCollider col;
@@ -54,23 +56,21 @@ public class PlayerMovement : MonoBehaviour
     Mode mode = Mode.Flying;
 
     CameraController camCon;
-    CapsuleCollider pm;
     Rigidbody rb;
     Vector3 dir = Vector3.zero;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
-        pm = GetComponent<CapsuleCollider>();
         camCon = GetComponentInChildren<CameraController>();
         col = GetComponent<CapsuleCollider>();
     }
 
-    //void OnGUI()
-    //{
-    //    GUILayout.Label("Spid: " + new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
-    //    GUILayout.Label("SpidUp: " + rb.velocity.y);
-    //}
+    void OnGUI()
+    {
+        GUILayout.Label("Spid: " + new Vector3(rb.velocity.x, 0, rb.velocity.z).magnitude);
+        GUILayout.Label("SpidUp: " + rb.velocity.y);
+    }
 
     void Update()
     {
@@ -110,7 +110,6 @@ public class PlayerMovement : MonoBehaviour
             bannedGroundNormal = Vector3.zero;
         }
 
-        wrTimer = Mathf.Max(wrTimer - Time.deltaTime, 0f);
         wallStickTimer = Mathf.Max(wallStickTimer - Time.deltaTime, 0f);
         wallBan = Mathf.Max(wallBan - Time.deltaTime, 0f);
 
@@ -119,6 +118,7 @@ public class PlayerMovement : MonoBehaviour
             case Mode.Wallruning:
                 camCon.SetTilt(WallrunCameraAngle());
                 Wallrun(dir, wallSpeed, wallClimbSpeed, wallAccel);
+                if (ground.tag != "InfiniteWallrun") wrTimer = Mathf.Max(wrTimer - Time.deltaTime, 0f);
                 break;
 
             case Mode.Walking:
@@ -163,6 +163,7 @@ public class PlayerMovement : MonoBehaviour
                     EnterWalking();
                     grounded = true;
                     groundNormal = contact.normal;
+                    ground = contact.otherCollider;
                     return;
                 }
             }
@@ -183,6 +184,7 @@ public class PlayerMovement : MonoBehaviour
                         {
                             grounded = true;
                             groundNormal = contact.normal;
+                            ground = contact.otherCollider;
                             EnterWallrun();
                             return;
                         }
@@ -269,10 +271,10 @@ public class PlayerMovement : MonoBehaviour
         }
         else
         {
-            if (crouched) acceleration = 1f;
+            //if (crouched) acceleration = 0.5f;
             wishDir = wishDir.normalized;
             Vector3 spid = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-            if (spid.magnitude > maxSpeed) acceleration *= spid.magnitude/maxSpeed;
+            if (spid.magnitude > maxSpeed) acceleration *= spid.magnitude / maxSpeed;
             Vector3 direction = wishDir * maxSpeed - spid;
 
             if (direction.magnitude < 0.5f)
@@ -287,6 +289,7 @@ public class PlayerMovement : MonoBehaviour
 
             Vector3 slopeCorrection = groundNormal * Physics.gravity.y / groundNormal.y;
             slopeCorrection.y = 0f;
+            //if(!crouched)
             direction += slopeCorrection;
 
             rb.AddForce(direction, ForceMode.Acceleration);
@@ -342,11 +345,10 @@ public class PlayerMovement : MonoBehaviour
             //Horizontal
             Vector3 distance = VectorToWall();
             wishDir = RotateToPlane(wishDir, -distance.normalized);
-            wishDir = wishDir.normalized * maxSpeed;
+            wishDir *= maxSpeed;
             wishDir.y = Mathf.Clamp(wishDir.y, -climbSpeed, climbSpeed);
             Vector3 wallrunForce = wishDir - rb.velocity;
-            wallrunForce = wallrunForce.normalized * acceleration;
-            if (new Vector3(rb.velocity.x, 0f, rb.velocity.z).magnitude > maxSpeed) wallrunForce /= 2f;
+            if (wallrunForce.magnitude > 0.2f) wallrunForce = wallrunForce.normalized * acceleration;
 
             //Vertical
             if (rb.velocity.y < 0f && wishDir.y > 0f) wallrunForce.y = 2f * acceleration;
@@ -356,14 +358,14 @@ public class PlayerMovement : MonoBehaviour
             if (wrTimer < 0.33 * wallRunTime)
             {
                 antiGravityForce *= wrTimer / wallRunTime;
-                wallrunForce += antiGravityForce + Physics.gravity;
+                wallrunForce += (Physics.gravity + antiGravityForce);
             }
-            if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
 
-            //Adding forces
-            rb.AddForce(antiGravityForce, ForceMode.Acceleration);
-            rb.AddForce(distance.normalized * wallStickiness * Mathf.Clamp(distance.magnitude / wallStickDistance, 0, 1), ForceMode.Acceleration);
+            //Forces
             rb.AddForce(wallrunForce, ForceMode.Acceleration);
+            rb.AddForce(antiGravityForce, ForceMode.Acceleration);
+            if (distance.magnitude > wallStickDistance) distance = Vector3.zero;
+            rb.AddForce(distance * wallStickiness, ForceMode.Acceleration);
         }
         if (!grounded)
         {
@@ -408,7 +410,7 @@ public class PlayerMovement : MonoBehaviour
                     }
                     else
                     {
-                        newSpidMagnitude = Mathf.Clamp(dashSpeed * (1 + dot), dashSpeed * (dashSpeed/horSpid.magnitude) , dashSpeed);
+                        newSpidMagnitude = Mathf.Clamp(dashSpeed * (1 + dot), dashSpeed * (dashSpeed / horSpid.magnitude), dashSpeed);
                     }
                 }
 
@@ -474,7 +476,7 @@ public class PlayerMovement : MonoBehaviour
     Vector3 VectorToWall()
     {
         Vector3 direction;
-        Vector3 position = transform.position + Vector3.down * 0.5f;
+        Vector3 position = transform.position + Vector3.up * col.height / 2f;
         RaycastHit hit;
         if (Physics.Raycast(position, -groundNormal, out hit, wallStickDistance) && Vector3.Angle(groundNormal, hit.normal) < 70)
         {
